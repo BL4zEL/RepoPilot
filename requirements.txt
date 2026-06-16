@@ -1,1 +1,1 @@
-Python>=3.10
+streamlit==1.58.0
