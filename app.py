@@ -27,13 +27,17 @@ def print_cli_summary(result: dict) -> None:
     scan_result = result["scan_result"]
     tech_stack = result["tech_stack"]
     run_info = result["run_info"]
-    repo_health = result.get("repo_health", {})
+    repo_health = result.get("health_report") or result.get("repo_health", {})
     file_analysis = result.get("file_analysis")
     save_result = result["save_result"]
     analyze_files_requested = result.get("analyze_files_requested", False)
     use_ai_requested = result.get("use_ai_requested", False)
+    readme_style = result.get("readme_style", "detailed")
+    save_location = result.get("save_location", "repo")
 
     print(f"Repo name: {scan_result['repo_name']}")
+    print(f"README style: {readme_style}")
+    print(f"Save location: {save_location}")
     print(f"File understanding: {'enabled' if analyze_files_requested or use_ai_requested else 'disabled'}")
     print(f"AI mode: {get_ai_mode_status(file_analysis, use_ai_requested)}")
 
@@ -111,6 +115,18 @@ def main() -> int:
         action="store_true",
         help="Use optional AI enhancement for file summaries. This also enables file analysis.",
     )
+    parser.add_argument(
+        "--style",
+        choices=["basic", "detailed", "beginner", "portfolio"],
+        default="detailed",
+        help="README style to generate.",
+    )
+    parser.add_argument(
+        "--save-location",
+        choices=["repo", "outputs"],
+        default="repo",
+        help="Save inside the target repo or into RepoPilot's outputs folder.",
+    )
     args = parser.parse_args()
 
     try:
@@ -119,6 +135,8 @@ def main() -> int:
             overwrite=args.overwrite,
             analyze_files=args.analyze_files or args.use_ai,
             use_ai=args.use_ai,
+            readme_style=args.style,
+            save_location=args.save_location,
         )
     except (FileNotFoundError, NotADirectoryError, PermissionError, OSError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
