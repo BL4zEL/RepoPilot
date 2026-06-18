@@ -8,6 +8,7 @@ from pathlib import Path
 from repo_scanner import scan_repository, validate_repo_path
 from run_detector import detect_run_instructions, format_run_instructions_for_markdown
 from tech_detector import detect_tech_stack, format_tech_stack_for_markdown
+from repo_health import analyze_repo_health, format_health_section_for_readme
 
 
 def format_project_title(repo_name: str) -> str:
@@ -183,6 +184,15 @@ def generate_readme(
     project_tree = format_project_tree_for_markdown(scan_result)
     run_instructions_markdown = format_run_instructions_for_markdown(run_info)
 
+    # Generate health suggestions section
+    health_result = analyze_repo_health(
+        root_path,
+        scan_result=scan_result,
+        tech_stack=tech_stack,
+        run_info=run_info,
+    )
+    health_section = format_health_section_for_readme(health_result)
+
     rendered_readme = replace_template_values(
         template,
         {
@@ -194,6 +204,10 @@ def generate_readme(
             "run_instructions": run_instructions_markdown,
         },
     )
+
+    # Append health section if it exists
+    if health_section:
+        rendered_readme = rendered_readme.rstrip() + "\n" + health_section
 
     return clean_markdown_spacing(rendered_readme)
 

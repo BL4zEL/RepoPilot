@@ -5,6 +5,7 @@ import sys
 
 from readme_generator import generate_and_save_readme
 from tech_detector import format_tech_stack_for_markdown
+from repo_health import analyze_repo_health, format_health_summary_for_cli
 
 
 def print_cli_summary(result: dict) -> None:
@@ -45,7 +46,17 @@ def print_cli_summary(result: dict) -> None:
         for note in run_info["notes"]:
             print(f"- {note}")
 
-    print(f"Saved file path: {save_result['saved_path']}")
+    # Print repo health score
+    from pathlib import Path
+    health_result = analyze_repo_health(
+        Path(scan_result["repo_path"]),
+        scan_result=scan_result,
+        tech_stack=tech_stack,
+        run_info=run_info,
+    )
+    print(format_health_summary_for_cli(health_result))
+
+    print(f"\nSaved file path: {save_result['saved_path']}")
     print(save_result["message"])
 
 

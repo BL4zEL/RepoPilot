@@ -8,6 +8,7 @@ from readme_generator import generate_readme, save_readme
 from repo_scanner import scan_repository
 from run_detector import detect_run_instructions
 from tech_detector import detect_tech_stack
+from repo_health import analyze_repo_health
 
 
 TECH_STACK_LABELS = [
@@ -28,6 +29,7 @@ def initialize_session_state() -> None:
         "tech_stack": None,
         "run_info": None,
         "readme_markdown": "",
+        "health_result": None,
         "save_result": None,
     }
 
@@ -77,6 +79,12 @@ def scan_and_generate(repo_path: str) -> None:
             tech_stack=tech_stack,
             run_info=run_info,
         )
+        health_result = analyze_repo_health(
+            repo_path,
+            scan_result=scan_result,
+            tech_stack=tech_stack,
+            run_info=run_info,
+        )
     except (FileNotFoundError, NotADirectoryError, PermissionError, OSError, ValueError) as error:
         st.error(f"Scanning failed: {error}")
         return
@@ -88,6 +96,7 @@ def scan_and_generate(repo_path: str) -> None:
     st.session_state.tech_stack = tech_stack
     st.session_state.run_info = run_info
     st.session_state.readme_markdown = readme_markdown
+    st.session_state.health_result = health_result
     st.session_state.save_result = None
 
 
@@ -188,6 +197,57 @@ def render_suggestions_tab(scan_result: dict, tech_stack: dict) -> None:
         st.markdown(f"- {suggestion}")
 
 
+def render_repo_health_tab(health_result: dict) -> None:
+    """Render the Repo Health tab with score, checks, and suggestions."""
+    if not health_result:
+        st.info("Run a scan to see repo health analysis.")
+        return
+
+    # Score and grade already shown above, but we can show progress bar here
+    score = health_result.get("score", 0)
+    grade = health_result.get("grade", "N/A")
+
+    st.markdown(f"**Score:** {score}/100 | **Grade:** {grade}")
+    st.progress(score / 100)
+
+    # Checks table
+    st.subheader("Checks")
+    checks = health_result.get("checks", [])
+    if checks:
+        check_data = []
+        for check in checks:
+            status = "✅ Pass" if check["passed"] else "❌ Fail"
+            points = f"{check['points_awarded']}/{check['points_possible']}"
+            check_data.append({
+                "Check": check["name"],
+                "Status": status,
+                "Points": points,
+                "Message": check["message"],
+            })
+        st.table(check_data)
+
+    # Strengths section
+    strengths = health_result.get("strengths", [])
+    if strengths:
+        st.subheader("Strengths")
+        for strength in strengths:
+            st.markdown(f"- {strength}")
+
+    # Issues section
+    issues = health_result.get("issues", [])
+    if issues:
+        st.subheader("Issues")
+        for issue in issues:
+            st.markdown(f"- {issue}")
+
+    # Suggestions section
+    suggestions = health_result.get("suggestions", [])
+    if suggestions:
+        st.subheader("Suggestions")
+        for suggestion in suggestions:
+            st.markdown(f"- {suggestion}")
+
+
 def render_save_section(repo_path: str, readme_markdown: str) -> None:
     """Render save controls and save result messages."""
     st.subheader("Save README")
@@ -257,6 +317,13 @@ def main() -> None:
     tech_stack = st.session_state.tech_stack or {}
     run_info = st.session_state.run_info or {}
     readme_markdown = st.session_state.readme_markdown
+    health_result = st.session_state.health_result or {}
+
+    # Show repo health score metrics
+    if health_result:
+        health_cols = st.columns(2)
+        health_cols[0].metric("Repo Health Score", f"{health_result.get('score', 0)}/100")
+        health_cols[1].metric("Grade", health_result.get('grade', 'N/A'))
 
     metric_columns = st.columns(3)
     metric_columns[0].metric("Repo name", scan_result["repo_name"])
@@ -265,8 +332,8 @@ def main() -> None:
 
     render_tech_stack_section(tech_stack)
 
-    preview_tab, structure_tab, run_tab, suggestions_tab = st.tabs(
-        ["README Preview", "Project Structure", "Setup & Run", "Suggestions"]
+    preview_tab, structure_tab, run_tab, suggestions_tab, health_tab = st.tabs(
+        ["README Preview", "Project Structure", "Setup & Run", "Suggestions", "Repo Health"]
     )
 
     with preview_tab:
@@ -280,6 +347,9 @@ def main() -> None:
 
     with suggestions_tab:
         render_suggestions_tab(scan_result, tech_stack)
+
+    with health_tab:
+        render_repo_health_tab(health_result)
 
     render_save_section(st.session_state.repo_path, readme_markdown)
     st.caption("Run locally with: `streamlit run streamlit_app.py`")
