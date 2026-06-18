@@ -5,6 +5,7 @@ import re
 import sys
 from pathlib import Path
 
+from file_understander import analyze_project_files
 from repo_scanner import scan_repository, validate_repo_path
 from run_detector import detect_run_instructions, format_run_instructions_for_markdown
 from tech_detector import detect_tech_stack, format_tech_stack_for_markdown
@@ -148,11 +149,109 @@ def clean_markdown_spacing(markdown_text: str) -> str:
     return "\n".join(cleaned_lines).strip() + "\n"
 
 
+def format_repo_health_suggestions(repo_health: dict | None) -> str:
+    """Create a small README section from the top repo health suggestions."""
+    if not repo_health:
+        return ""
+
+    suggestions = repo_health.get("suggestions", [])[:3]
+    if not suggestions:
+        return ""
+
+    suggestion_lines = "\n".join(f"- {suggestion}" for suggestion in suggestions)
+    return f"## Repository Health Suggestions\n\n{suggestion_lines}\n"
+
+
+def build_fallback_code_explanation(scan_result: dict, tech_stack: dict) -> str:
+    """Create a simple explanation when file analysis is not enabled."""
+    frameworks = set(tech_stack.get("frameworks", []))
+    important_files = scan_result.get("important_files", [])
+
+    if "Streamlit" in frameworks:
+        project_logic = (
+            "The project is organized around a Streamlit interface. The main UI file collects user input, "
+            "shows results, and connects the frontend workflow to helper modules that do the backend processing."
+        )
+    elif "Flask" in frameworks:
+        project_logic = (
+            "The project follows a lightweight Flask structure. A main backend file likely starts the server, "
+            "defines routes, and connects templates or API responses to supporting project logic."
+        )
+    elif "React" in frameworks or "Next.js" in frameworks:
+        project_logic = (
+            "The project is organized around frontend entry files and reusable interface logic. "
+            "Main app files control the user interface flow, while supporting files provide behavior and styling."
+        )
+    elif any(file_path.endswith(".ino") for file_path in scan_result.get("files", [])):
+        project_logic = (
+            "The project is centered around firmware behavior. The main embedded file initializes hardware "
+            "and repeatedly handles device logic such as sensors, relays, or connectivity."
+        )
+    else:
+        project_logic = (
+            "The project is organized around a few main source files and supporting configuration. "
+            "These files work together to provide the application logic, setup, and runtime behavior."
+        )
+
+    important_preview = "\n".join(f"- `{Path(file_path).name}` is an important project file." for file_path in important_files[:5])
+    if not important_preview:
+        important_preview = "- Main source files and config files make up the core project structure."
+
+    return (
+        "## Beginner-Friendly Code Explanation\n\n"
+        "### Project Logic\n\n"
+        f"{project_logic}\n\n"
+        "### Important Files\n\n"
+        f"{important_preview}\n"
+    )
+
+
+def format_file_understanding_for_markdown(file_analysis: dict | None, max_files: int = 8) -> str:
+    """Render the file understanding results as a README section."""
+    if not file_analysis or not file_analysis.get("analyzed_files"):
+        return ""
+
+    lines = [
+        "## Beginner-Friendly Code Explanation",
+        "",
+        "### Project Logic",
+        "",
+        file_analysis.get("project_logic_summary", "Project logic summary is not available."),
+        "",
+        "### Important Files",
+        "",
+    ]
+
+    for file_info in file_analysis.get("analyzed_files", [])[:max_files]:
+        lines.append(f"#### {file_info['path']}")
+        lines.append(file_info["summary"])
+        lines.append("")
+
+        if file_info.get("detected_patterns"):
+            lines.append("Detected:")
+            for pattern in file_info["detected_patterns"]:
+                lines.append(f"- {pattern}")
+            lines.append("")
+
+        functions_and_classes = []
+        functions_and_classes.extend(file_info.get("important_functions", []))
+        functions_and_classes.extend(file_info.get("important_classes", []))
+        if functions_and_classes:
+            lines.append("Functions / Classes:")
+            for name in functions_and_classes[:10]:
+                lines.append(f"- {name}")
+            lines.append("")
+
+    return "\n".join(lines).strip() + "\n"
+
+
 def generate_readme(
     repo_path: str | Path,
     scan_result: dict | None = None,
     tech_stack: dict | None = None,
     run_info: dict | None = None,
+    repo_health: dict | None = None,
+    file_analysis: dict | None = None,
 ) -> str:
     """
     Generate a complete README markdown string for the given repository.
@@ -175,6 +274,16 @@ def generate_readme(
             tech_stack=tech_stack,
         )
 
+    if repo_health is None:
+        from repo_health import analyze_repo_health
+
+        repo_health = analyze_repo_health(
+            root_path,
+            scan_result=scan_result,
+            tech_stack=tech_stack,
+            run_info=run_info,
+        )
+
     template = load_readme_template()
     project_title = format_project_title(scan_result.get("repo_name", root_path.name))
     overview = generate_overview(tech_stack)
@@ -194,6 +303,16 @@ def generate_readme(
             "run_instructions": run_instructions_markdown,
         },
     )
+
+    code_explanation = format_file_understanding_for_markdown(file_analysis)
+    if not code_explanation:
+        code_explanation = build_fallback_code_explanation(scan_result, tech_stack)
+
+    rendered_readme = f"{rendered_readme.rstrip()}\n\n{code_explanation}"
+
+    repo_health_suggestions = format_repo_health_suggestions(repo_health)
+    if repo_health_suggestions:
+        rendered_readme = f"{rendered_readme.rstrip()}\n\n{repo_health_suggestions}"
 
     return clean_markdown_spacing(rendered_readme)
 
@@ -245,7 +364,12 @@ def save_readme(
     }
 
 
-def generate_and_save_readme(repo_path: str | Path, overwrite: bool = False) -> dict:
+def generate_and_save_readme(
+    repo_path: str | Path,
+    overwrite: bool = False,
+    analyze_files: bool = False,
+    use_ai: bool = False,
+) -> dict:
     """Run the full offline README workflow and save the final file."""
     root_path = validate_repo_path(repo_path)
     target_readme_path = root_path / "README.md"
@@ -258,11 +382,29 @@ def generate_and_save_readme(repo_path: str | Path, overwrite: bool = False) -> 
         scan_result=scan_result,
         tech_stack=tech_stack,
     )
+    from repo_health import analyze_repo_health
+
+    repo_health = analyze_repo_health(
+        root_path,
+        scan_result=scan_result,
+        tech_stack=tech_stack,
+        run_info=run_info,
+    )
+    file_analysis = None
+    if analyze_files or use_ai:
+        file_analysis = analyze_project_files(
+            root_path,
+            scan_result=scan_result,
+            tech_stack=tech_stack,
+            use_ai=use_ai,
+        )
     readme_preview = generate_readme(
         root_path,
         scan_result=scan_result,
         tech_stack=tech_stack,
         run_info=run_info,
+        repo_health=repo_health,
+        file_analysis=file_analysis,
     )
     save_result = save_readme(readme_preview, root_path, overwrite=overwrite)
 
@@ -277,6 +419,8 @@ def generate_and_save_readme(repo_path: str | Path, overwrite: bool = False) -> 
         "scan_result": scan_result,
         "tech_stack": tech_stack,
         "run_info": run_info,
+        "repo_health": repo_health,
+        "file_analysis": file_analysis,
         "readme_preview": readme_preview,
         "save_result": save_result,
     }

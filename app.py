@@ -7,14 +7,35 @@ from readme_generator import generate_and_save_readme
 from tech_detector import format_tech_stack_for_markdown
 
 
+def get_ai_mode_status(file_analysis: dict | None, use_ai_requested: bool) -> str:
+    """Translate file analysis limitations into a short AI status label."""
+    if not use_ai_requested:
+        return "disabled"
+
+    if not file_analysis:
+        return "fallback"
+
+    limitation_text = " ".join(file_analysis.get("limitations", []))
+    if "AI mode requested" in limitation_text or "AI enhancement failed" in limitation_text:
+        return "fallback"
+
+    return "enabled"
+
+
 def print_cli_summary(result: dict) -> None:
     """Print a friendly summary after README generation finishes."""
     scan_result = result["scan_result"]
     tech_stack = result["tech_stack"]
     run_info = result["run_info"]
+    repo_health = result.get("repo_health", {})
+    file_analysis = result.get("file_analysis")
     save_result = result["save_result"]
+    analyze_files_requested = result.get("analyze_files_requested", False)
+    use_ai_requested = result.get("use_ai_requested", False)
 
     print(f"Repo name: {scan_result['repo_name']}")
+    print(f"File understanding: {'enabled' if analyze_files_requested or use_ai_requested else 'disabled'}")
+    print(f"AI mode: {get_ai_mode_status(file_analysis, use_ai_requested)}")
 
     tech_summary = format_tech_stack_for_markdown(tech_stack)
     print("Detected tech stack summary:")
@@ -45,6 +66,26 @@ def print_cli_summary(result: dict) -> None:
         for note in run_info["notes"]:
             print(f"- {note}")
 
+    if repo_health:
+        print(f"Repo Health Score: {repo_health['score']}/100")
+        print(f"Grade: {repo_health['grade']}")
+
+        passed_checks = [check["name"] for check in repo_health.get("checks", []) if check.get("passed")]
+        if passed_checks:
+            print("Passed:")
+            for check_name in passed_checks:
+                print(f"- {check_name}")
+
+        if repo_health.get("issues"):
+            print("Needs improvement:")
+            for issue in repo_health["issues"]:
+                print(f"- {issue}")
+
+        if repo_health.get("suggestions"):
+            print("Suggestions:")
+            for suggestion in repo_health["suggestions"]:
+                print(f"- {suggestion}")
+
     print(f"Saved file path: {save_result['saved_path']}")
     print(save_result["message"])
 
@@ -60,10 +101,25 @@ def main() -> int:
         action="store_true",
         help="Overwrite an existing README.md instead of saving GENERATED_README.md.",
     )
+    parser.add_argument(
+        "--analyze-files",
+        action="store_true",
+        help="Analyze important project files for a deeper code explanation.",
+    )
+    parser.add_argument(
+        "--use-ai",
+        action="store_true",
+        help="Use optional AI enhancement for file summaries. This also enables file analysis.",
+    )
     args = parser.parse_args()
 
     try:
-        result = generate_and_save_readme(args.repo_path, overwrite=args.overwrite)
+        result = generate_and_save_readme(
+            args.repo_path,
+            overwrite=args.overwrite,
+            analyze_files=args.analyze_files or args.use_ai,
+            use_ai=args.use_ai,
+        )
     except (FileNotFoundError, NotADirectoryError, PermissionError, OSError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
@@ -73,6 +129,8 @@ def main() -> int:
     except AttributeError:
         pass
 
+    result["analyze_files_requested"] = args.analyze_files or args.use_ai
+    result["use_ai_requested"] = args.use_ai
     print_cli_summary(result)
     return 0
 
